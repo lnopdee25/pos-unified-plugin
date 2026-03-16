@@ -108,6 +108,7 @@ class POS_Unified_Admin {
 
 		// Order sync
 		update_option( 'pos_unified_order_sync_enabled', isset( $_POST['pos_unified_order_sync_enabled'] ) ? 1 : 0 );
+		update_option( 'pos_unified_pull_pos_orders', isset( $_POST['pos_unified_pull_pos_orders'] ) ? 1 : 0 );
 
 		if ( isset( $_POST['pos_unified_default_store'] ) ) {
 			update_option( 'pos_unified_default_store', sanitize_text_field( wp_unslash( $_POST['pos_unified_default_store'] ) ) );

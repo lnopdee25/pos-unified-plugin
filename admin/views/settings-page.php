@@ -184,13 +184,24 @@ $tabs = array(
 			<!-- ORDERS TAB -->
 			<table class="form-table">
 				<tr>
-					<th>Enable Order Sync</th>
+					<th>Push WC Orders to Diacos</th>
 					<td>
 						<label>
 							<input type="checkbox" name="pos_unified_order_sync_enabled" value="1"
 								<?php checked( get_option( 'pos_unified_order_sync_enabled', 0 ), 1 ); ?> />
-							Push WooCommerce orders to Diacos POS
+							When a WooCommerce order is placed, push it to Diacos POS
 						</label>
+					</td>
+				</tr>
+				<tr>
+					<th>Pull POS Orders to WooCommerce</th>
+					<td>
+						<label>
+							<input type="checkbox" name="pos_unified_pull_pos_orders" value="1"
+								<?php checked( get_option( 'pos_unified_pull_pos_orders', 0 ), 1 ); ?> />
+							Import Diacos POS orders into WooCommerce automatically
+						</label>
+						<p class="description">POS orders will appear in WooCommerce with source "diacos_pos". Only new orders are imported (no duplicates).</p>
 					</td>
 				</tr>
 				<tr>
@@ -206,7 +217,7 @@ $tabs = array(
 				<tr>
 					<th>Manual Sync</th>
 					<td>
-						<button type="button" class="button" id="pos-unified-sync-orders-btn">Pull Order Status Updates</button>
+						<button type="button" class="button" id="pos-unified-sync-orders-btn">Pull Orders &amp; Status Updates</button>
 						<span id="pos-unified-sync-orders-result" style="margin-left: 10px;"></span>
 					</td>
 				</tr>

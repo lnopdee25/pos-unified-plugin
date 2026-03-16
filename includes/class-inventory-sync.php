@@ -86,14 +86,23 @@ class POS_Unified_Inventory_Sync {
 
 				$pagination = isset( $result['data']['pagination'] ) ? $result['data']['pagination'] : null;
 
+				$this->log( "Fetched " . count( $products ) . " products from Diacos store {$diacos_store_id} page {$page}" );
+
+				// Log first product structure for debugging
+				if ( $page === 1 && ! empty( $products ) ) {
+					$this->log( "Sample product data: " . wp_json_encode( $products[0] ) );
+				}
+
 				foreach ( $products as $diacos_product ) {
 					$sku = isset( $diacos_product['sku'] ) ? $diacos_product['sku'] : '';
 					if ( empty( $sku ) ) {
+						$this->log( "Skipping product with no SKU: " . wp_json_encode( array_keys( $diacos_product ) ) );
 						continue;
 					}
 
 					$wc_product_id = wc_get_product_id_by_sku( $sku );
 					if ( ! $wc_product_id ) {
+						$this->log( "No WC product found for Diacos SKU: {$sku}" );
 						continue;
 					}
 
