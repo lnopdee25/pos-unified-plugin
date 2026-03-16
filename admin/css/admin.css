@@ -1,0 +1,31 @@
+.pos-unified-wrap {
+	max-width: 900px;
+}
+
+.pos-unified-wrap .nav-tab-wrapper {
+	margin-bottom: 20px;
+}
+
+.pos-unified-wrap .form-table th {
+	width: 180px;
+}
+
+.pos-unified-wrap .widefat td,
+.pos-unified-wrap .widefat th {
+	padding: 10px 12px;
+}
+
+.pos-unified-wrap .widefat .diacos-store-select {
+	min-width: 250px;
+}
+
+.pos-unified-wrap code {
+	background: #f0f0f0;
+	padding: 2px 6px;
+	border-radius: 3px;
+	font-size: 12px;
+}
+
+#pos-unified-store-map-table tbody tr:nth-child(even) {
+	background: #f9f9f9;
+}
