@@ -21,7 +21,6 @@ class POS_Unified_Admin {
 
 	private function hooks() {
 		add_action( 'admin_menu', array( $this, 'add_menu' ) );
-		add_action( 'admin_init', array( $this, 'register_settings' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_action( 'wp_ajax_pos_unified_test_connection', array( $this, 'ajax_test_connection' ) );
 		add_action( 'wp_ajax_pos_unified_fetch_stores', array( $this, 'ajax_fetch_stores' ) );
@@ -37,64 +36,6 @@ class POS_Unified_Admin {
 			'pos-unified',
 			array( $this, 'render_page' )
 		);
-	}
-
-	public function register_settings() {
-		register_setting( 'pos_unified_settings', 'pos_unified_api_url', array(
-			'type'              => 'string',
-			'sanitize_callback' => 'esc_url_raw',
-		) );
-		register_setting( 'pos_unified_settings', 'pos_unified_api_key', array(
-			'type'              => 'string',
-			'sanitize_callback' => 'sanitize_text_field',
-		) );
-		register_setting( 'pos_unified_settings', 'pos_unified_timeout', array(
-			'type'              => 'integer',
-			'sanitize_callback' => 'absint',
-			'default'           => 30,
-		) );
-		register_setting( 'pos_unified_settings', 'pos_unified_webhook_secret', array(
-			'type'              => 'string',
-			'sanitize_callback' => 'sanitize_text_field',
-		) );
-		register_setting( 'pos_unified_settings', 'pos_unified_sync_direction', array(
-			'type'              => 'string',
-			'sanitize_callback' => 'sanitize_text_field',
-			'default'           => 'diacos_to_wc',
-		) );
-		register_setting( 'pos_unified_settings', 'pos_unified_order_sync_enabled', array(
-			'type'              => 'boolean',
-			'sanitize_callback' => array( $this, 'sanitize_bool' ),
-		) );
-		register_setting( 'pos_unified_settings', 'pos_unified_default_store', array(
-			'type'              => 'string',
-			'sanitize_callback' => 'sanitize_text_field',
-		) );
-		register_setting( 'pos_unified_settings', 'pos_unified_debug', array(
-			'type'              => 'boolean',
-			'sanitize_callback' => array( $this, 'sanitize_bool' ),
-		) );
-		register_setting( 'pos_unified_settings', 'pos_unified_store_map', array(
-			'type'              => 'array',
-			'sanitize_callback' => array( $this, 'sanitize_store_map' ),
-		) );
-	}
-
-	/**
-	 * Sanitize boolean values safely.
-	 */
-	public function sanitize_bool( $value ) {
-		return (bool) $value;
-	}
-
-	/**
-	 * Sanitize store map — accepts JSON string or array.
-	 */
-	public function sanitize_store_map( $value ) {
-		if ( is_string( $value ) ) {
-			$value = json_decode( $value, true );
-		}
-		return is_array( $value ) ? $value : array();
 	}
 
 	public function enqueue_assets( $hook ) {
@@ -124,8 +65,64 @@ class POS_Unified_Admin {
 	}
 
 	public function render_page() {
+		// Handle form save
+		if ( isset( $_POST['pos_unified_save'] ) && check_admin_referer( 'pos_unified_save_settings' ) ) {
+			$this->save_settings();
+			echo '<div class="notice notice-success"><p>Settings saved.</p></div>';
+		}
+
 		$active_tab = isset( $_GET['tab'] ) ? sanitize_text_field( wp_unslash( $_GET['tab'] ) ) : 'connection';
 		include POS_UNIFIED_PATH . 'admin/views/settings-page.php';
+	}
+
+	/**
+	 * Save all settings manually.
+	 */
+	private function save_settings() {
+		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+			return;
+		}
+
+		// Connection settings
+		if ( isset( $_POST['pos_unified_api_url'] ) ) {
+			update_option( 'pos_unified_api_url', esc_url_raw( wp_unslash( $_POST['pos_unified_api_url'] ) ) );
+		}
+		if ( isset( $_POST['pos_unified_api_key'] ) ) {
+			update_option( 'pos_unified_api_key', sanitize_text_field( wp_unslash( $_POST['pos_unified_api_key'] ) ) );
+		}
+		if ( isset( $_POST['pos_unified_webhook_secret'] ) ) {
+			update_option( 'pos_unified_webhook_secret', sanitize_text_field( wp_unslash( $_POST['pos_unified_webhook_secret'] ) ) );
+		}
+		if ( isset( $_POST['pos_unified_timeout'] ) ) {
+			$timeout = absint( $_POST['pos_unified_timeout'] );
+			update_option( 'pos_unified_timeout', $timeout > 0 ? $timeout : 30 );
+		}
+
+		// Debug
+		update_option( 'pos_unified_debug', isset( $_POST['pos_unified_debug'] ) ? 1 : 0 );
+
+		// Sync direction
+		if ( isset( $_POST['pos_unified_sync_direction'] ) ) {
+			update_option( 'pos_unified_sync_direction', sanitize_text_field( wp_unslash( $_POST['pos_unified_sync_direction'] ) ) );
+		}
+
+		// Order sync
+		update_option( 'pos_unified_order_sync_enabled', isset( $_POST['pos_unified_order_sync_enabled'] ) ? 1 : 0 );
+
+		if ( isset( $_POST['pos_unified_default_store'] ) ) {
+			update_option( 'pos_unified_default_store', sanitize_text_field( wp_unslash( $_POST['pos_unified_default_store'] ) ) );
+		}
+
+		// Store map
+		if ( isset( $_POST['pos_unified_store_map'] ) ) {
+			$map_data = wp_unslash( $_POST['pos_unified_store_map'] );
+			if ( is_string( $map_data ) ) {
+				$map_data = json_decode( $map_data, true );
+			}
+			if ( is_array( $map_data ) ) {
+				update_option( 'pos_unified_store_map', $map_data );
+			}
+		}
 	}
 
 	// ── AJAX Handlers ─────────────────────────────────────────────
@@ -162,13 +159,12 @@ class POS_Unified_Admin {
 		$client = new POS_Unified_API_Client();
 
 		if ( ! $client->is_configured() ) {
-			wp_send_json_error( 'API not configured.' );
+			wp_send_json_error( 'API not configured. Save your API URL and Key on the Connection tab first.' );
 		}
 
 		$result = $client->get_stores();
 
 		if ( $result['success'] ) {
-			// Cache for transient use in settings page
 			set_transient( 'pos_unified_diacos_stores', $result['data'], HOUR_IN_SECONDS );
 			wp_send_json_success( $result['data'] );
 		} else {

@@ -3,6 +3,7 @@
  * Inventory Sync — bidirectional stock sync between WC and Diacos.
  *
  * Products matched by SKU. Stock synced per-location using store mapper.
+ * Supports WC MLI plugin (wp_wc_mli_inventory table) and fallback to WC core stock.
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -28,7 +29,7 @@ class POS_Unified_Inventory_Sync {
 		// Cron-based full sync
 		add_action( 'pos_unified_inventory_sync', array( $this, 'run_sync' ) );
 
-		// Real-time: WC stock change → push to Diacos
+		// Real-time: WC stock change -> push to Diacos
 		add_action( 'woocommerce_product_set_stock', array( $this, 'on_wc_stock_change' ) );
 		add_action( 'woocommerce_variation_set_stock', array( $this, 'on_wc_stock_change' ) );
 	}
@@ -62,7 +63,6 @@ class POS_Unified_Inventory_Sync {
 				continue;
 			}
 
-			// Fetch all products from Diacos for this store
 			$page = 1;
 			do {
 				$result = $client->get_products( $diacos_store_id, array(
@@ -80,12 +80,11 @@ class POS_Unified_Inventory_Sync {
 				if ( is_array( $result['data'] ) ) {
 					$products = isset( $result['data']['data'] ) ? $result['data']['data'] : $result['data'];
 				}
-
-				$pagination = isset( $result['data']['pagination'] ) ? $result['data']['pagination'] : null;
-
 				if ( ! is_array( $products ) ) {
 					$products = array();
 				}
+
+				$pagination = isset( $result['data']['pagination'] ) ? $result['data']['pagination'] : null;
 
 				foreach ( $products as $diacos_product ) {
 					$sku = isset( $diacos_product['sku'] ) ? $diacos_product['sku'] : '';
@@ -99,7 +98,7 @@ class POS_Unified_Inventory_Sync {
 					}
 
 					$wc_product = wc_get_product( $wc_product_id );
-					if ( ! $wc_product || ! $wc_product->managing_stock() ) {
+					if ( ! $wc_product ) {
 						continue;
 					}
 
@@ -145,7 +144,6 @@ class POS_Unified_Inventory_Sync {
 	 * Real-time: push WC stock change to Diacos.
 	 */
 	public function on_wc_stock_change( $product ) {
-		// Prevent infinite loop from our own sync
 		if ( $this->is_syncing ) {
 			return;
 		}
@@ -201,22 +199,24 @@ class POS_Unified_Inventory_Sync {
 
 	/**
 	 * Get stock for a specific WC location.
+	 * Supports: WC MLI table, post meta, and fallback to core stock.
 	 */
 	private function get_location_stock( $product, $location_id ) {
+		// Default/single location — use WC core stock
 		if ( $location_id === 'default' ) {
 			return (int) $product->get_stock_quantity();
 		}
 
-		// WC Multi-Location Inventory
+		// WC MLI plugin (location ID format: mli_123)
+		if ( strpos( $location_id, 'mli_' ) === 0 ) {
+			$mli_location_id = (int) str_replace( 'mli_', '', $location_id );
+			return $this->get_mli_stock( $product->get_id(), $mli_location_id );
+		}
+
+		// Taxonomy-based location (post meta fallback)
 		$location_stock = get_post_meta( $product->get_id(), "_stock_location_{$location_id}", true );
 		if ( $location_stock !== '' && $location_stock !== false ) {
 			return (int) $location_stock;
-		}
-
-		// ATUM Multi-Inventory
-		$atum_stock = get_post_meta( $product->get_id(), "_atum_stock_{$location_id}", true );
-		if ( $atum_stock !== '' && $atum_stock !== false ) {
-			return (int) $atum_stock;
 		}
 
 		return (int) $product->get_stock_quantity();
@@ -234,17 +234,92 @@ class POS_Unified_Inventory_Sync {
 			return;
 		}
 
-		// Update location-specific meta
-		update_post_meta( $product->get_id(), "_stock_location_{$location_id}", $quantity );
+		// WC MLI plugin
+		if ( strpos( $location_id, 'mli_' ) === 0 ) {
+			$mli_location_id = (int) str_replace( 'mli_', '', $location_id );
+			$this->set_mli_stock( $product->get_id(), $mli_location_id, $quantity );
+			$this->is_syncing = false;
+			return;
+		}
 
-		// Also update the total stock (sum of all locations)
+		// Taxonomy-based fallback
+		update_post_meta( $product->get_id(), "_stock_location_{$location_id}", $quantity );
 		$this->recalculate_total_stock( $product );
 
 		$this->is_syncing = false;
 	}
 
 	/**
-	 * Recalculate total stock from all location metas.
+	 * Get stock from WC MLI inventory table.
+	 */
+	private function get_mli_stock( $product_id, $location_id ) {
+		global $wpdb;
+
+		$table = $wpdb->prefix . 'wc_mli_inventory';
+		$stock = $wpdb->get_var( $wpdb->prepare(
+			"SELECT stock_quantity FROM {$table} WHERE product_id = %d AND location_id = %d",
+			$product_id,
+			$location_id
+		) );
+
+		return $stock !== null ? (int) $stock : 0;
+	}
+
+	/**
+	 * Set stock in WC MLI inventory table.
+	 * Uses the WC_MLI_Inventory class if available, otherwise direct DB update.
+	 */
+	private function set_mli_stock( $product_id, $location_id, $quantity ) {
+		// Use MLI's own method if class exists (handles stock status, caching, etc.)
+		if ( class_exists( 'WC_MLI_Inventory' ) && method_exists( 'WC_MLI_Inventory', 'update_stock' ) ) {
+			WC_MLI_Inventory::update_stock( $product_id, $location_id, $quantity, 'set' );
+			return;
+		}
+
+		// Direct DB fallback
+		global $wpdb;
+		$table = $wpdb->prefix . 'wc_mli_inventory';
+
+		$exists = $wpdb->get_var( $wpdb->prepare(
+			"SELECT id FROM {$table} WHERE product_id = %d AND location_id = %d",
+			$product_id,
+			$location_id
+		) );
+
+		if ( $exists ) {
+			$wpdb->update(
+				$table,
+				array(
+					'stock_quantity' => $quantity,
+					'stock_status'   => $quantity > 0 ? 'instock' : 'outofstock',
+					'updated_at'     => current_time( 'mysql' ),
+				),
+				array(
+					'product_id'  => $product_id,
+					'location_id' => $location_id,
+				),
+				array( '%d', '%s', '%s' ),
+				array( '%d', '%d' )
+			);
+		} else {
+			$wpdb->insert(
+				$table,
+				array(
+					'product_id'     => $product_id,
+					'location_id'    => $location_id,
+					'stock_quantity' => $quantity,
+					'stock_status'   => $quantity > 0 ? 'instock' : 'outofstock',
+					'manage_stock'   => 1,
+					'backorders'     => 'no',
+					'updated_at'     => current_time( 'mysql' ),
+				),
+				array( '%d', '%d', '%d', '%s', '%d', '%s', '%s' )
+			);
+		}
+	}
+
+	/**
+	 * Recalculate total stock from all location metas (taxonomy-based only).
 	 */
 	private function recalculate_total_stock( $product ) {
 		global $wpdb;

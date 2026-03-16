@@ -2,8 +2,11 @@
 /**
  * Maps WC Multi-Location Inventory locations to Diacos stores.
  *
- * Option key: pos_unified_store_map
- * Format: array( array( 'wc_location_id' => string, 'diacos_store_id' => string, 'enabled' => bool ) )
+ * Supports:
+ *   - WC MLI plugin (custom table: wp_wc_mli_locations)
+ *   - WC Multi-Location taxonomy (taxonomy: location)
+ *   - ATUM Multi-Inventory (taxonomy: atum_location)
+ *   - Fallback: single default location
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -74,13 +77,15 @@ class POS_Unified_Store_Mapper {
 	}
 
 	/**
-	 * Detect WC Multi-Location Inventory locations.
-	 * Supports both ATUM Multi-Location and WC native locations.
+	 * Detect WC locations from all supported sources.
 	 */
 	public function get_wc_locations() {
 		$locations = array();
 
-		// Check for WC Multi-Location Inventory plugin (taxonomy: location)
+		// 1. Check for WC Multi-Location Inventory plugin (custom DB table)
+		$locations = array_merge( $locations, $this->get_wc_mli_locations() );
+
+		// 2. Check for WC Multi-Location taxonomy
 		if ( taxonomy_exists( 'location' ) ) {
 			$terms = get_terms( array(
 				'taxonomy'   => 'location',
@@ -89,16 +94,16 @@ class POS_Unified_Store_Mapper {
 			if ( ! is_wp_error( $terms ) && is_array( $terms ) ) {
 				foreach ( $terms as $term ) {
 					$locations[] = array(
-						'id'     => $term->term_id,
+						'id'     => 'tax_' . $term->term_id,
 						'name'   => $term->name,
 						'slug'   => $term->slug,
-						'source' => 'wc-multi-location',
+						'source' => 'wc-taxonomy',
 					);
 				}
 			}
 		}
 
-		// Check for ATUM Multi-Inventory locations
+		// 3. Check for ATUM Multi-Inventory locations
 		if ( taxonomy_exists( 'atum_location' ) ) {
 			$terms = get_terms( array(
 				'taxonomy'   => 'atum_location',
@@ -107,7 +112,7 @@ class POS_Unified_Store_Mapper {
 			if ( ! is_wp_error( $terms ) && is_array( $terms ) ) {
 				foreach ( $terms as $term ) {
 					$locations[] = array(
-						'id'     => $term->term_id,
+						'id'     => 'atum_' . $term->term_id,
 						'name'   => $term->name,
 						'slug'   => $term->slug,
 						'source' => 'atum',
@@ -116,7 +121,7 @@ class POS_Unified_Store_Mapper {
 			}
 		}
 
-		// Fallback: single-location mode
+		// 4. Fallback: single-location mode
 		if ( empty( $locations ) ) {
 			$locations[] = array(
 				'id'     => 'default',
@@ -124,6 +129,54 @@ class POS_Unified_Store_Mapper {
 				'slug'   => 'default',
 				'source' => 'single',
 			);
+		}
+
+		return $locations;
+	}
+
+	/**
+	 * Get locations from WC Multi-Location Inventory plugin (wp_wc_mli_locations table).
+	 */
+	private function get_wc_mli_locations() {
+		global $wpdb;
+
+		$locations = array();
+		$table     = $wpdb->prefix . 'wc_mli_locations';
+
+		// Check if the table exists
+		$table_exists = $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(1) FROM information_schema.tables WHERE table_schema = %s AND table_name = %s",
+			DB_NAME,
+			$table
+		) );
+
+		if ( ! $table_exists ) {
+			return $locations;
+		}
+
+		$results = $wpdb->get_results(
+			"SELECT id, name, slug, city, state, is_active FROM {$table} WHERE is_active = 1 ORDER BY sort_order ASC, id ASC",
+			ARRAY_A
+		);
+
+		if ( ! empty( $results ) && is_array( $results ) ) {
+			foreach ( $results as $row ) {
+				$display_name = $row['name'];
+				if ( ! empty( $row['city'] ) ) {
+					$display_name .= ' (' . $row['city'];
+					if ( ! empty( $row['state'] ) ) {
+						$display_name .= ', ' . $row['state'];
+					}
+					$display_name .= ')';
+				}
+
+				$locations[] = array(
+					'id'     => 'mli_' . $row['id'],
+					'name'   => $display_name,
+					'slug'   => $row['slug'],
+					'source' => 'wc-mli',
+				);
+			}
 		}
 
 		return $locations;
