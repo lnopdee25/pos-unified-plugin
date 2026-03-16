@@ -1,13 +1,13 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-$tabs = [
+$tabs = array(
 	'connection' => 'Connection',
 	'stores'     => 'Store Mapping',
 	'inventory'  => 'Inventory Sync',
 	'orders'     => 'Order Sync',
 	'logs'       => 'Status & Logs',
-];
+);
 ?>
 <div class="wrap pos-unified-wrap">
 	<h1>POS Unified — Diacos Integration</h1>
@@ -42,7 +42,7 @@ $tabs = [
 						<input type="password" name="pos_unified_api_key"
 							   value="<?php echo esc_attr( get_option( 'pos_unified_api_key', '' ) ); ?>"
 							   class="regular-text" placeholder="dk_live_..." />
-						<p class="description">Generate this in Diacos > Settings > Integrations > API Keys.</p>
+						<p class="description">Generate this in Diacos &gt; Settings &gt; Integrations &gt; API Keys.</p>
 					</td>
 				</tr>
 				<tr>
@@ -88,14 +88,21 @@ $tabs = [
 			$wc_locations = $mapper->get_wc_locations();
 			$mappings     = $mapper->get_mappings();
 
-			// Index existing mappings by WC location ID
-			$map_index = [];
+			$map_index = array();
 			foreach ( $mappings as $m ) {
-				$map_index[ (string) $m['wc_location_id'] ] = $m;
+				if ( isset( $m['wc_location_id'] ) ) {
+					$map_index[ (string) $m['wc_location_id'] ] = $m;
+				}
 			}
 			?>
 			<p>Map your WooCommerce locations to Diacos stores. <button type="button" class="button" id="pos-unified-fetch-stores-btn">Refresh Diacos Stores</button></p>
-			<div id="pos-unified-stores-cache" style="display:none;" data-stores='<?php echo esc_attr( wp_json_encode( get_transient( 'pos_unified_diacos_stores' ) ?: [] ) ); ?>'></div>
+			<?php
+			$cached_stores = get_transient( 'pos_unified_diacos_stores' );
+			if ( ! is_array( $cached_stores ) ) {
+				$cached_stores = array();
+			}
+			?>
+			<div id="pos-unified-stores-cache" style="display:none;" data-stores='<?php echo esc_attr( wp_json_encode( $cached_stores ) ); ?>'></div>
 
 			<table class="widefat" id="pos-unified-store-map-table">
 				<thead>
@@ -109,7 +116,7 @@ $tabs = [
 				<tbody>
 					<?php foreach ( $wc_locations as $loc ) :
 						$loc_id  = (string) $loc['id'];
-						$current = $map_index[ $loc_id ] ?? [];
+						$current = isset( $map_index[ $loc_id ] ) ? $map_index[ $loc_id ] : array();
 					?>
 					<tr>
 						<td>
@@ -121,7 +128,7 @@ $tabs = [
 							<select name="pos_unified_store_map_diacos[]" class="diacos-store-select">
 								<option value="">— Not mapped —</option>
 							</select>
-							<input type="hidden" class="diacos-store-saved" value="<?php echo esc_attr( $current['diacos_store_id'] ?? '' ); ?>" />
+							<input type="hidden" class="diacos-store-saved" value="<?php echo esc_attr( isset( $current['diacos_store_id'] ) ? $current['diacos_store_id'] : '' ); ?>" />
 						</td>
 						<td>
 							<input type="checkbox" name="pos_unified_store_map_enabled[]" value="<?php echo esc_attr( $loc_id ); ?>"
@@ -140,8 +147,8 @@ $tabs = [
 					<td>
 						<?php $direction = get_option( 'pos_unified_sync_direction', 'diacos_to_wc' ); ?>
 						<select name="pos_unified_sync_direction">
-							<option value="diacos_to_wc" <?php selected( $direction, 'diacos_to_wc' ); ?>>Diacos → WooCommerce (POS is source of truth)</option>
-							<option value="wc_to_diacos" <?php selected( $direction, 'wc_to_diacos' ); ?>>WooCommerce → Diacos (WC is source of truth)</option>
+							<option value="diacos_to_wc" <?php selected( $direction, 'diacos_to_wc' ); ?>>Diacos &rarr; WooCommerce (POS is source of truth)</option>
+							<option value="wc_to_diacos" <?php selected( $direction, 'wc_to_diacos' ); ?>>WooCommerce &rarr; Diacos (WC is source of truth)</option>
 							<option value="bidirectional" <?php selected( $direction, 'bidirectional' ); ?>>Bidirectional (last write wins)</option>
 						</select>
 					</td>
@@ -157,12 +164,12 @@ $tabs = [
 					<th>Last Sync</th>
 					<td>
 						<?php
-						$last = get_option( 'pos_unified_last_inventory_sync', [] );
-						if ( $last ) {
+						$last = get_option( 'pos_unified_last_inventory_sync', array() );
+						if ( ! empty( $last ) && is_array( $last ) ) {
 							printf( '%s — %d synced, %d errors',
-								esc_html( $last['time'] ?? 'Never' ),
-								$last['synced'] ?? 0,
-								$last['errors'] ?? 0
+								esc_html( isset( $last['time'] ) ? $last['time'] : 'Never' ),
+								isset( $last['synced'] ) ? (int) $last['synced'] : 0,
+								isset( $last['errors'] ) ? (int) $last['errors'] : 0
 							);
 						} else {
 							echo 'Never';
@@ -221,7 +228,7 @@ $tabs = [
 					<td>
 						<?php
 						$client = new POS_Unified_API_Client();
-						echo $client->is_configured() ? '✅ Configured' : '❌ Not configured';
+						echo $client->is_configured() ? '&#9989; Configured' : '&#10060; Not configured';
 						?>
 					</td>
 				</tr>
@@ -231,11 +238,11 @@ $tabs = [
 				</tr>
 				<tr>
 					<td><strong>Inventory Cron</strong></td>
-					<td><?php echo wp_next_scheduled( 'pos_unified_inventory_sync' ) ? '✅ Scheduled' : '❌ Not scheduled'; ?></td>
+					<td><?php echo wp_next_scheduled( 'pos_unified_inventory_sync' ) ? '&#9989; Scheduled' : '&#10060; Not scheduled'; ?></td>
 				</tr>
 				<tr>
 					<td><strong>Order Cron</strong></td>
-					<td><?php echo wp_next_scheduled( 'pos_unified_order_sync' ) ? '✅ Scheduled' : '❌ Not scheduled'; ?></td>
+					<td><?php echo wp_next_scheduled( 'pos_unified_order_sync' ) ? '&#9989; Scheduled' : '&#10060; Not scheduled'; ?></td>
 				</tr>
 				<tr>
 					<td><strong>Webhook URL</strong></td>
@@ -245,8 +252,15 @@ $tabs = [
 					<td><strong>Last Inventory Sync</strong></td>
 					<td>
 						<?php
-						$last = get_option( 'pos_unified_last_inventory_sync', [] );
-						echo $last ? esc_html( ( $last['time'] ?? 'Never' ) . " — {$last['synced']} synced, {$last['errors']} errors" ) : 'Never';
+						$last = get_option( 'pos_unified_last_inventory_sync', array() );
+						if ( ! empty( $last ) && is_array( $last ) ) {
+							$time = isset( $last['time'] ) ? $last['time'] : 'Never';
+							$synced_count = isset( $last['synced'] ) ? (int) $last['synced'] : 0;
+							$error_count = isset( $last['errors'] ) ? (int) $last['errors'] : 0;
+							echo esc_html( "{$time} — {$synced_count} synced, {$error_count} errors" );
+						} else {
+							echo 'Never';
+						}
 						?>
 					</td>
 				</tr>
