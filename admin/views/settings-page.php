@@ -10,7 +10,7 @@ $tabs = array(
 );
 ?>
 <div class="wrap pos-unified-wrap">
-	<h1>POS Unified — Diacos Integration</h1>
+	<h1>POS Unified &mdash; Diacos Integration</h1>
 
 	<nav class="nav-tab-wrapper">
 		<?php foreach ( $tabs as $slug => $label ) : ?>
@@ -21,8 +21,9 @@ $tabs = array(
 		<?php endforeach; ?>
 	</nav>
 
-	<form method="post" action="options.php" id="pos-unified-form">
-		<?php settings_fields( 'pos_unified_settings' ); ?>
+	<form method="post" id="pos-unified-form">
+		<?php wp_nonce_field( 'pos_unified_save_settings' ); ?>
+		<input type="hidden" name="pos_unified_save" value="1" />
 
 		<?php if ( $active_tab === 'connection' ) : ?>
 			<!-- CONNECTION TAB -->
@@ -39,7 +40,7 @@ $tabs = array(
 				<tr>
 					<th>API Key</th>
 					<td>
-						<input type="password" name="pos_unified_api_key"
+						<input type="text" name="pos_unified_api_key"
 							   value="<?php echo esc_attr( get_option( 'pos_unified_api_key', '' ) ); ?>"
 							   class="regular-text" placeholder="dk_live_..." />
 						<p class="description">Generate this in Diacos &gt; Settings &gt; Integrations &gt; API Keys.</p>
@@ -48,7 +49,7 @@ $tabs = array(
 				<tr>
 					<th>Webhook Secret</th>
 					<td>
-						<input type="password" name="pos_unified_webhook_secret"
+						<input type="text" name="pos_unified_webhook_secret"
 							   value="<?php echo esc_attr( get_option( 'pos_unified_webhook_secret', '' ) ); ?>"
 							   class="regular-text" />
 						<p class="description">Shared secret for webhook signature verification. Webhook URL: <code><?php echo esc_url( rest_url( 'pos-unified/v1/webhook' ) ); ?></code></p>
@@ -67,7 +68,7 @@ $tabs = array(
 					<td>
 						<label>
 							<input type="checkbox" name="pos_unified_debug" value="1"
-								<?php checked( get_option( 'pos_unified_debug', false ) ); ?> />
+								<?php checked( get_option( 'pos_unified_debug', 0 ), 1 ); ?> />
 							Enable debug logging to <code>wp-content/debug.log</code>
 						</label>
 					</td>
@@ -126,7 +127,7 @@ $tabs = array(
 						<td><code><?php echo esc_html( $loc['source'] ); ?></code></td>
 						<td>
 							<select name="pos_unified_store_map_diacos[]" class="diacos-store-select">
-								<option value="">— Not mapped —</option>
+								<option value="">-- Not mapped --</option>
 							</select>
 							<input type="hidden" class="diacos-store-saved" value="<?php echo esc_attr( isset( $current['diacos_store_id'] ) ? $current['diacos_store_id'] : '' ); ?>" />
 						</td>
@@ -166,7 +167,7 @@ $tabs = array(
 						<?php
 						$last = get_option( 'pos_unified_last_inventory_sync', array() );
 						if ( ! empty( $last ) && is_array( $last ) ) {
-							printf( '%s — %d synced, %d errors',
+							printf( '%s &mdash; %d synced, %d errors',
 								esc_html( isset( $last['time'] ) ? $last['time'] : 'Never' ),
 								isset( $last['synced'] ) ? (int) $last['synced'] : 0,
 								isset( $last['errors'] ) ? (int) $last['errors'] : 0
@@ -187,7 +188,7 @@ $tabs = array(
 					<td>
 						<label>
 							<input type="checkbox" name="pos_unified_order_sync_enabled" value="1"
-								<?php checked( get_option( 'pos_unified_order_sync_enabled', false ) ); ?> />
+								<?php checked( get_option( 'pos_unified_order_sync_enabled', 0 ), 1 ); ?> />
 							Push WooCommerce orders to Diacos POS
 						</label>
 					</td>
@@ -196,7 +197,7 @@ $tabs = array(
 					<th>Default Diacos Store</th>
 					<td>
 						<select name="pos_unified_default_store" class="diacos-store-select">
-							<option value="">— Auto (first mapped store) —</option>
+							<option value="">-- Auto (first mapped store) --</option>
 						</select>
 						<input type="hidden" class="diacos-store-saved" value="<?php echo esc_attr( get_option( 'pos_unified_default_store', '' ) ); ?>" />
 						<p class="description">Which Diacos store receives online orders.</p>
@@ -228,9 +229,13 @@ $tabs = array(
 					<td>
 						<?php
 						$client = new POS_Unified_API_Client();
-						echo $client->is_configured() ? '&#9989; Configured' : '&#10060; Not configured';
+						echo $client->is_configured() ? 'Configured' : 'Not configured';
 						?>
 					</td>
+				</tr>
+				<tr>
+					<td><strong>API URL</strong></td>
+					<td><code><?php echo esc_html( get_option( 'pos_unified_api_url', 'Not set' ) ); ?></code></td>
 				</tr>
 				<tr>
 					<td><strong>Mapped Stores</strong></td>
@@ -238,11 +243,11 @@ $tabs = array(
 				</tr>
 				<tr>
 					<td><strong>Inventory Cron</strong></td>
-					<td><?php echo wp_next_scheduled( 'pos_unified_inventory_sync' ) ? '&#9989; Scheduled' : '&#10060; Not scheduled'; ?></td>
+					<td><?php echo wp_next_scheduled( 'pos_unified_inventory_sync' ) ? 'Scheduled' : 'Not scheduled'; ?></td>
 				</tr>
 				<tr>
 					<td><strong>Order Cron</strong></td>
-					<td><?php echo wp_next_scheduled( 'pos_unified_order_sync' ) ? '&#9989; Scheduled' : '&#10060; Not scheduled'; ?></td>
+					<td><?php echo wp_next_scheduled( 'pos_unified_order_sync' ) ? 'Scheduled' : 'Not scheduled'; ?></td>
 				</tr>
 				<tr>
 					<td><strong>Webhook URL</strong></td>
@@ -257,7 +262,7 @@ $tabs = array(
 							$time = isset( $last['time'] ) ? $last['time'] : 'Never';
 							$synced_count = isset( $last['synced'] ) ? (int) $last['synced'] : 0;
 							$error_count = isset( $last['errors'] ) ? (int) $last['errors'] : 0;
-							echo esc_html( "{$time} — {$synced_count} synced, {$error_count} errors" );
+							echo esc_html( "{$time} - {$synced_count} synced, {$error_count} errors" );
 						} else {
 							echo 'Never';
 						}
@@ -272,7 +277,7 @@ $tabs = array(
 		<?php endif; ?>
 
 		<?php if ( $active_tab !== 'logs' ) : ?>
-			<?php submit_button(); ?>
+			<?php submit_button( 'Save Changes' ); ?>
 		<?php endif; ?>
 	</form>
 </div>
