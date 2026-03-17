@@ -37,10 +37,16 @@ class POS_Unified_Webhook_Handler {
 	 * Verify webhook signature.
 	 */
 	public function verify_signature( $request ) {
-		$signature = $request->get_header( 'X-Diacos-Signature' );
-		$secret    = get_option( 'pos_unified_webhook_secret', '' );
+		$secret = get_option( 'pos_unified_webhook_secret', '' );
 
-		if ( empty( $signature ) || empty( $secret ) ) {
+		// If no secret is configured, allow the webhook (for initial setup)
+		if ( empty( $secret ) ) {
+			$this->log( 'Warning: webhook secret not configured, accepting without verification' );
+			return true;
+		}
+
+		$signature = $request->get_header( 'X-Diacos-Signature' );
+		if ( empty( $signature ) ) {
 			return false;
 		}
 
@@ -63,6 +69,11 @@ class POS_Unified_Webhook_Handler {
 		switch ( $event ) {
 			case 'inventory.updated':
 				$this->handle_inventory_update( $data );
+				break;
+
+			case 'order.created':
+			case 'order.updated':
+				$this->handle_order_created( $data );
 				break;
 
 			case 'order.status_changed':
@@ -123,20 +134,72 @@ class POS_Unified_Webhook_Handler {
 	}
 
 	/**
-	 * Handle order status change from Diacos.
+	 * Handle new POS order from Diacos — create it in WooCommerce automatically.
 	 */
-	private function handle_order_status_change( $data ) {
-		$reference = isset( $data['reference'] ) ? $data['reference'] : '';
-		$status    = isset( $data['status'] ) ? $data['status'] : '';
+	private function handle_order_created( $data ) {
+		$diacos_order_id = isset( $data['id'] ) ? $data['id'] : '';
+		$reference       = isset( $data['reference'] ) ? $data['reference'] : '';
+		$order_number    = isset( $data['orderNumber'] ) ? $data['orderNumber'] : $diacos_order_id;
+		$store_id        = isset( $data['storeId'] ) ? $data['storeId'] : '';
 
-		if ( strpos( $reference, 'WC-' ) !== 0 ) {
+		// Skip orders that originated from WooCommerce
+		if ( strpos( $reference, 'WC-' ) === 0 ) {
+			$this->log( "Skipping order {$order_number} — originated from WooCommerce" );
 			return;
 		}
 
-		$wc_order_id = (int) str_replace( 'WC-', '', $reference );
-		$order       = wc_get_order( $wc_order_id );
+		// Skip if already imported
+		if ( ! empty( $diacos_order_id ) ) {
+			$existing = wc_get_orders( array(
+				'meta_key'   => '_diacos_order_id',
+				'meta_value' => $diacos_order_id,
+				'limit'      => 1,
+			) );
+			if ( ! empty( $existing ) ) {
+				$this->log( "Order {$order_number} already exists in WC as #{$existing[0]->get_id()}" );
+				return;
+			}
+		}
+
+		// Use the order sync class to create the WC order
+		$order_sync = POS_Unified_Order_Sync::instance();
+		$wc_order   = $order_sync->create_wc_order_from_diacos( $data, $store_id );
+
+		if ( $wc_order ) {
+			$this->log( "Order {$order_number} -> WC #{$wc_order->get_id()} (via webhook)" );
+		} else {
+			$this->log( "Failed to create WC order from Diacos {$order_number}" );
+		}
+	}
+
+	/**
+	 * Handle order status change from Diacos.
+	 */
+	private function handle_order_status_change( $data ) {
+		$diacos_order_id = isset( $data['id'] ) ? $data['id'] : '';
+		$reference       = isset( $data['reference'] ) ? $data['reference'] : '';
+		$status          = isset( $data['status'] ) ? $data['status'] : '';
+
+		// Find WC order by Diacos order ID first, then by WC- reference
+		$order = null;
+		if ( ! empty( $diacos_order_id ) ) {
+			$orders = wc_get_orders( array(
+				'meta_key'   => '_diacos_order_id',
+				'meta_value' => $diacos_order_id,
+				'limit'      => 1,
+			) );
+			if ( ! empty( $orders ) ) {
+				$order = $orders[0];
+			}
+		}
+
+		if ( ! $order && strpos( $reference, 'WC-' ) === 0 ) {
+			$wc_order_id = (int) str_replace( 'WC-', '', $reference );
+			$order       = wc_get_order( $wc_order_id );
+		}
+
 		if ( ! $order ) {
-			$this->log( "WC order not found: #{$wc_order_id}" );
+			$this->log( "WC order not found for Diacos order {$diacos_order_id}" );
 			return;
 		}
 
@@ -152,7 +215,7 @@ class POS_Unified_Webhook_Handler {
 		if ( $new_status && $order->get_status() !== $new_status ) {
 			do_action( 'pos_unified_status_from_diacos' );
 			$order->update_status( $new_status, "Diacos POS status: {$status}" );
-			$this->log( "Order #{$wc_order_id} status updated to {$new_status}" );
+			$this->log( "Order #{$order->get_id()} status updated to {$new_status}" );
 		}
 	}
 

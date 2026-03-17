@@ -249,7 +249,7 @@ class POS_Unified_Order_Sync {
 	/**
 	 * Create a WooCommerce order from a Diacos POS order.
 	 */
-	private function create_wc_order_from_diacos( $diacos_order, $store_id ) {
+	public function create_wc_order_from_diacos( $diacos_order, $store_id ) {
 		$diacos_order_id = isset( $diacos_order['id'] ) ? $diacos_order['id'] : '';
 		$order_number    = isset( $diacos_order['orderNumber'] ) ? $diacos_order['orderNumber'] : $diacos_order_id;
 		$items           = isset( $diacos_order['items'] ) ? $diacos_order['items'] : array();
