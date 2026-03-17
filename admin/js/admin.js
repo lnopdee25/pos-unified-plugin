@@ -146,10 +146,17 @@
 				_ajax_nonce: posUnified.nonce
 			},
 			success: function (res) {
+				console.log('[POS Unified] Order sync response:', res);
 				$btn.prop('disabled', false);
-				$result.html('<span style="color:green">Done</span>');
+				if (res.success && res.data) {
+					var pulled = res.data.pulled || 0;
+					$result.html('<span style="color:green">Done — ' + pulled + ' new order(s) pulled</span>');
+				} else {
+					$result.html('<span style="color:red">Sync failed: ' + (res.data || 'Unknown error') + '</span>');
+				}
 			},
 			error: function (xhr, status, error) {
+				console.error('[POS Unified] Order sync error:', status, error, xhr.responseText);
 				$btn.prop('disabled', false);
 				$result.html('<span style="color:red">Request failed: ' + error + '</span>');
 			}

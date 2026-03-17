@@ -24,21 +24,20 @@ class POS_Unified_Order_Sync {
 	}
 
 	private function hooks() {
-		$sync_enabled = get_option( 'pos_unified_order_sync_enabled', false );
-		if ( ! $sync_enabled ) {
-			return;
+		// Push WC orders to Diacos (only if enabled)
+		$push_enabled = get_option( 'pos_unified_order_sync_enabled', false );
+		if ( $push_enabled ) {
+			add_action( 'woocommerce_order_status_processing', array( $this, 'push_order_to_diacos' ) );
+			add_action( 'woocommerce_order_status_completed', array( $this, 'push_order_to_diacos' ) );
+			add_action( 'woocommerce_order_status_changed', array( $this, 'sync_status_change' ), 10, 4 );
 		}
 
-		// Push new WC orders to Diacos
-		add_action( 'woocommerce_order_status_processing', array( $this, 'push_order_to_diacos' ) );
-		add_action( 'woocommerce_order_status_completed', array( $this, 'push_order_to_diacos' ) );
-
-		// Sync status changes
-		add_action( 'woocommerce_order_status_changed', array( $this, 'sync_status_change' ), 10, 4 );
-
-		// Cron: pull Diacos orders + status updates
+		// Cron: always register pull hooks (they check their own settings internally)
 		add_action( 'pos_unified_order_sync', array( $this, 'pull_diacos_orders' ) );
 		add_action( 'pos_unified_order_sync', array( $this, 'pull_status_updates' ) );
+
+		// AJAX handler for manual pull
+		add_action( 'wp_ajax_pos_unified_manual_pull_orders', array( $this, 'ajax_manual_pull_orders' ) );
 	}
 
 	/**
@@ -142,6 +141,20 @@ class POS_Unified_Order_Sync {
 	}
 
 	/**
+	 * AJAX: manual pull orders (triggered from admin button).
+	 */
+	public function ajax_manual_pull_orders() {
+		check_ajax_referer( 'pos_unified_nonce', '_ajax_nonce' );
+		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+			wp_send_json_error( 'Unauthorized' );
+		}
+
+		// Force pull regardless of setting
+		$result = $this->do_pull_diacos_orders( true );
+		wp_send_json_success( $result );
+	}
+
+	/**
 	 * Pull new Diacos POS orders into WooCommerce.
 	 */
 	public function pull_diacos_orders() {
@@ -150,19 +163,35 @@ class POS_Unified_Order_Sync {
 			return;
 		}
 
+		$this->do_pull_diacos_orders( false );
+	}
+
+	/**
+	 * Core pull logic — shared by cron and manual AJAX.
+	 */
+	public function do_pull_diacos_orders( $force = false ) {
 		$client = new POS_Unified_API_Client();
 		if ( ! $client->is_configured() ) {
-			return;
+			$this->log( 'Pull orders: API not configured' );
+			return array( 'created' => 0, 'error' => 'API not configured' );
 		}
 
 		$mapper    = POS_Unified_Store_Mapper::instance();
 		$store_ids = $mapper->get_enabled_store_ids();
 		$created   = 0;
 
+		$this->log( 'Pull orders: starting. Stores: ' . implode( ', ', $store_ids ) );
+
+		if ( empty( $store_ids ) ) {
+			$this->log( 'Pull orders: no enabled store mappings found' );
+			return array( 'created' => 0, 'error' => 'No stores mapped' );
+		}
+
 		foreach ( $store_ids as $store_id ) {
-			// Fetch recent orders from Diacos (last 10 minutes)
+			// Fetch recent orders from Diacos (last 24 hours for manual, 10 min for cron)
+			$since = $force ? time() - 86400 : time() - 600;
 			$result = $client->get_orders( $store_id, array(
-				'updatedSince' => gmdate( 'Y-m-d\TH:i:s\Z', time() - 600 ),
+				'updatedSince' => gmdate( 'Y-m-d\TH:i:s\Z', $since ),
 				'limit'        => 50,
 			) );
 
@@ -208,9 +237,13 @@ class POS_Unified_Order_Sync {
 
 		if ( $created > 0 ) {
 			$this->log( "Pulled {$created} new POS orders from Diacos" );
+		} else {
+			$this->log( 'Pull orders: no new orders to import' );
 		}
 
 		update_option( 'pos_unified_last_order_sync', current_time( 'mysql' ) );
+
+		return array( 'created' => $created );
 	}
 
 	/**

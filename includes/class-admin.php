@@ -185,7 +185,14 @@ class POS_Unified_Admin {
 		if ( $type === 'inventory' ) {
 			POS_Unified_Inventory_Sync::instance()->run_sync();
 		} elseif ( $type === 'orders' ) {
-			POS_Unified_Order_Sync::instance()->pull_status_updates();
+			$order_sync = POS_Unified_Order_Sync::instance();
+			// Pull new POS orders first, then sync statuses
+			$pull_result = $order_sync->do_pull_diacos_orders( true );
+			$order_sync->pull_status_updates();
+			wp_send_json_success( array(
+				'pulled' => isset( $pull_result['created'] ) ? $pull_result['created'] : 0,
+				'message' => 'Order sync complete',
+			) );
 		}
 
 		$last_sync = get_option( "pos_unified_last_{$type}_sync", array() );
